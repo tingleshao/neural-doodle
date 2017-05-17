@@ -63,7 +63,7 @@ class ansi:
     CYAN = '\033[0;36m'
     CYAN_B = '\033[1;36m'
     ENDC = '\033[0m'
-    
+
 def error(message, *lines):
     string = "\n{}ERROR: " + message + "{}\n" + "\n".join(lines) + "{}\n"
     print(string.format(ansi.RED_B, ansi.RED, ansi.ENDC))
@@ -150,7 +150,7 @@ class Model(object):
             if i == 0:
                 net['map%i'%(j+1)] = PoolLayer(net['map'], 2**j, mode='average_exc_pad')
             self.channels[suffix] = net['conv'+suffix].num_filters
-            
+
             if args.semantic_weight > 0.0:
                 net['sem'+suffix] = ConcatLayer([net['conv'+suffix], net['map%i'%(j+1)]])
             else:
@@ -351,7 +351,7 @@ class NeuralGenerator(object):
         extractor = self.compile([self.model.tensor_img, self.model.tensor_map], self.do_extract_patches(layer_outputs))
         result = extractor(self.style_img, self.style_map)
 
-        # Store all the style patches layer by layer, resized to match slice size and cast to 16-bit for size. 
+        # Store all the style patches layer by layer, resized to match slice size and cast to 16-bit for size.
         self.style_data = {}
         for layer, *data in zip(self.style_layers, result[0::3], result[1::3], result[2::3]):
             patches = data[0]
@@ -366,14 +366,14 @@ class NeuralGenerator(object):
         Here we compile a function to run on the GPU that returns all components separately.
         """
 
-        # Feed-forward calculation only, returns the result of the convolution post-activation 
+        # Feed-forward calculation only, returns the result of the convolution post-activation
         self.compute_features = self.compile([self.model.tensor_img, self.model.tensor_map],
                                              self.model.get_outputs('sem', self.style_layers))
 
         # Patch matching calculation that uses only pre-calculated features and a slice of the patches.
-        
+
         self.matcher_tensors = {l: lasagne.utils.shared_empty(dim=4) for l in self.style_layers}
-        self.matcher_history = {l: T.vector() for l in self.style_layers} 
+        self.matcher_history = {l: T.vector() for l in self.style_layers}
         self.matcher_inputs = {self.model.network['dup'+l]: self.matcher_tensors[l] for l in self.style_layers}
         nn_layers = [self.model.network['nn'+l] for l in self.style_layers]
         self.matcher_outputs = dict(zip(self.style_layers, lasagne.layers.get_output(nn_layers, self.matcher_inputs)))
@@ -476,6 +476,30 @@ class NeuralGenerator(object):
         loss = (((x[:,:,:-1,:-1] - x[:,:,1:,:-1])**2 + (x[:,:,:-1,:-1] - x[:,:,:-1,1:])**2)**1.25).mean()
         return [('smooth', 'img', args.smoothness * loss)]
 
+    def content_structural_loss(self):
+        """We want to enforce the structural similarity between the curr image and the content image
+        """
+        ssim_loss = []
+        if args.content_weight == 0.0:
+            return content_loss
+
+        # First extract all the features we need from the model, these results after convolution.
+        extractor = theano.function([self.model.tensor_img], self.model.get_outputs('conv', self.content_layers))
+        result = extractor(self.content_img)
+
+        # Build a list of loss components that compute the mean squared error by comparing current result to desired.
+        for l, ref in zip(self.content_layers, result):
+            layer = self.model.tensor_outputs['conv'+l]
+            loss = T.mean((layer - ref) ** 2.0) # TODO: change this to SSIM
+            content_loss.append(('ssim', l, 1.0 * loss))
+            print('  - Content layer conv ssim{}: {} features in {:,}kb.'.format(l, ref.shape[1], ref.size//1000))
+        return content_loss
+
+    def blurness_loss(self):
+        """penalize the blurness of the image background (how to mask the background?)
+        http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.193.1516&rep=rep1&type=pdf
+        """
+        return None
 
     #------------------------------------------------------------------------------------------------------------------
     # Optimization Loop
@@ -483,7 +507,7 @@ class NeuralGenerator(object):
 
     def iterate_batches(self, *arrays, batch_size):
         """Break down the data in arrays batch by batch and return them as a generator.
-        """ 
+        """
         total_size = arrays[0].shape[0]
         indices = np.arange(total_size)
         for index in range(0, total_size, batch_size):
