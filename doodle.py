@@ -383,7 +383,7 @@ class NeuralGenerator(object):
 
         self.tensor_matches = [T.tensor4() for l in self.style_layers]
         # Build a list of Theano expressions that, once summed up, compute the total error.
-        self.losses = self.content_loss() + self.total_variation_loss() + self.style_loss()
+        self.losses = self.content_loss() + self.total_variation_loss() + self.style_loss() + self.content_structural_loss()
         # Let Theano automatically compute the gradient of the error, used by LBFGS to update image pixels.
         grad = T.grad(sum([l[-1] for l in self.losses]), self.model.tensor_img)
         # Create a single function that returns the gradient and the individual errors components.
@@ -490,10 +490,17 @@ class NeuralGenerator(object):
         # Build a list of loss components that compute the mean squared error by comparing current result to desired.
         for l, ref in zip(self.content_layers, result):
             layer = self.model.tensor_outputs['conv'+l]
-            loss = T.mean((layer - ref) ** 2.0) # TODO: change this to SSIM
-            content_loss.append(('ssim', l, 1.0 * loss))
+            # loss = T.mean((layer - ref) ** 2.0) # TODO: change this to SSIM
+            cov = T.mean(T.dot(layer, ref)) - T.mean(layer) * T.mean(ref)
+            mean_v = T.mean(layer)
+            mean_r = T.mean(ref)
+
+            layer_v = T.mean((layer - mean_v) ** 2.0)
+            layer_r = T.mean((ref - mean_r) ** 2.0)
+            loss = (0.3 + cov)  / (layer_v * layer_r + 0.3)
+            ssim_loss.append(('ssim', l, 100000000000 * loss))
             print('  - Content layer conv ssim{}: {} features in {:,}kb.'.format(l, ref.shape[1], ref.size//1000))
-        return content_loss
+        return ssim_loss
 
     def blurness_loss(self):
         """penalize the blurness of the image background (how to mask the background?)
