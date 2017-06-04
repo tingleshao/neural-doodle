@@ -498,7 +498,7 @@ class NeuralGenerator(object):
             layer_v = T.mean((layer - mean_v) ** 2.0)
             layer_r = T.mean((ref - mean_r) ** 2.0)
             loss = (0.3 + cov)  / (layer_v * layer_r + 0.3)
-            ssim_loss.append(('ssim', l, 100000000000 * loss))
+            ssim_loss.append(('ssim', l, 1 - (100000000000 * loss))) # should be 1 minus ssim, since ssim is better when larger
             print('  - Content layer conv ssim{}: {} features in {:,}kb.'.format(l, ref.shape[1], ref.size//1000))
         return ssim_loss
 
